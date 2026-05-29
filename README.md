@@ -669,23 +669,10 @@ docker-compose down -v    # Matikan semua container + hapus volume log
 | 9 | Red Team walkthrough | Bagian README di atas | ✅ Done |
 | 10 | Blue Team walkthrough | Bagian README di atas | ✅ Done |
 | 11 | Push ke GitHub/GitLab | Repository | ✅ Done |
-| 12 | Presentasi 15-20 menit | Siapin sendiri | ⬜ TODO |
+
 
 ---
 
-## Tips Presentasi (15-20 menit)
 
-**Urutan yang disarankan:**
 
-| Waktu | Bagian | Yang Ditunjukkan |
-|-------|--------|-----------------|
-| 2 menit | Intro | Jelaskan arsitektur (gambar di atas) |
-| 3 menit | Infra | Tunjukkan `docker-compose ps`, jelaskan tiap container |
-| 7 menit | Red Team Demo | Jalankan attack chain live (curl commands) |
-| 5 menit | Blue Team Demo | SSH sebagai analyst, analisis log |
-| 3 menit | Q&A | Jawab pertanyaan |
 
-**Yang perlu disiapkan saat presentasi:**
-- Terminal 1: Browser buka `http://IP_SERVER:3075`
-- Terminal 2: Siap jalankan curl commands (Red Team)
-- Terminal 3: SSH analyst (Blue Team)
