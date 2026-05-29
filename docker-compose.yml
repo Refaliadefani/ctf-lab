@@ -1,0 +1,65 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+    container_name: ctf-feedback-app
+    restart: unless-stopped
+    volumes:
+      - logs_data:/opt/admin/logs
+    networks:
+      - ctf-network
+    environment:
+      - NODE_ENV=production
+
+  nginx:
+    image: nginx:alpine
+    container_name: ctf-nginx
+    restart: unless-stopped
+    ports:
+      - "3075:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - logs_data:/opt/admin/logs
+    depends_on:
+      - app
+    networks:
+      - ctf-network
+
+  ssh:
+    build:
+      context: ./ssh
+      dockerfile: Dockerfile
+    container_name: ctf-ssh
+    restart: unless-stopped
+    ports:
+      - "2275:22"
+    volumes:
+      - logs_data:/opt/admin/logs:ro
+    networks:
+      - ctf-network
+
+  log-injector:
+    image: alpine:latest
+    container_name: ctf-log-injector
+    volumes:
+      - ./scripts:/scripts
+      - logs_data:/opt/admin/logs
+    command: sh -c "chmod +x /scripts/generate-logs.sh && /scripts/generate-logs.sh"
+    depends_on:
+      - app
+    networks:
+      - ctf-network
+
+volumes:
+  logs_data:
+    driver: local
+
+networks:
+  ctf-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

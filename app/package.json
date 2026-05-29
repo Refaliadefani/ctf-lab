@@ -1,0 +1,14 @@
+{
+  "name": "admin-feedback-system",
+  "version": "1.0.0",
+  "description": "CTF Lab - Admin Feedback System (Vulnerable by Design)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "ejs": "^3.1.9",
+    "cookie-parser": "^1.4.6"
+  }
+}

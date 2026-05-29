@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin Feedback System</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Segoe UI', sans-serif; background: #1a1a2e; color: #eee; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+    .container { background: #16213e; padding: 2rem; border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.3); width: 100%%; max-width: 500px; }
+    h1 { color: #0f3460; background: #e94560; padding: 1rem; border-radius: 8px; text-align: center; margin-bottom: 1.5rem; }
+    label { display: block; margin-bottom: 0.5rem; color: #a8dadc; font-weight: bold; }
+    textarea { width: 100%%; min-height: 120px; padding: 0.75rem; border: 2px solid #0f3460; border-radius: 8px; background: #1a1a2e; color: #eee; font-size: 1rem; resize: vertical; }
+    textarea:focus { outline: none; border-color: #e94560; }
+    button { width: 100%%; padding: 0.75rem; margin-top: 1rem; background: #e94560; color: #fff; border: none; border-radius: 8px; font-size: 1rem; cursor: pointer; font-weight: bold; }
+    button:hover { background: #c73e54; }
+    .response { margin-top: 1rem; padding: 0.75rem; border-radius: 8px; display: none; }
+    .response.success { display: block; background: #1b4332; color: #95d5b2; }
+    .response.error { display: block; background: #3d0000; color: #ff6b6b; }
+    .footer { text-align: center; margin-top: 1.5rem; color: #666; font-size: 0.8rem; }
+  </style>
+</head>
+<!--
+    ╔══════════════════════════════════════════════════════════╗
+    ║                                                          ║
+    ║   ██████╗  ██████╗ ██████╗  ██████╗ ████████╗███████╗   ║
+    ║   ██╔══██╗██╔═══██╗██╔══██╗██╔═══██╗╚══██╔══╝██╔════╝  ║
+    ║   ██████╔╝██║   ██║██████╔╝██║   ██║   ██║   ███████╗   ║
+    ║   ██╔══██╗██║   ██║██╔══██╗██║   ██║   ██║   ╚════██║   ║
+    ║   ██║  ██║╚██████╔╝██████╔╝╚██████╔╝   ██║   ███████║   ║
+    ║   ╚═╝  ╚═╝ ╚═════╝ ╚═════╝  ╚═════╝    ╚═╝   ╚══════╝  ║
+    ║                                                          ║
+    ║   >> Hint: Have you checked robots.txt? <<               ║
+    ║                                                          ║
+    ╚══════════════════════════════════════════════════════════╝
+-->
+<body>
+  <div class="container">
+    <h1>Admin Feedback System</h1>
+    <form id="feedbackForm">
+      <label for="feedback">Submit Your Feedback:</label>
+      <textarea id="feedback" name="feedback" placeholder="Enter your feedback here..."></textarea>
+      <button type="submit">Submit Feedback</button>
+    </form>
+    <div id="response" class="response"></div>
+    <div class="footer">
+      &copy; 2026 Admin Feedback System v2.1.0
+    </div>
+  </div>
+
+  <script>
+    document.getElementById('feedbackForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const feedback = document.getElementById('feedback').value;
+      const responseDiv = document.getElementById('response');
+
+      try {
+        const res = await fetch('/api/feedback', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ feedback })
+        });
+
+        const data = await res.json();
+
+        if (res.ok) {
+          responseDiv.className = 'response success';
+          responseDiv.textContent = data.message;
+        } else {
+          responseDiv.className = 'response error';
+          responseDiv.textContent = data.error || 'Submission failed';
+        }
+      } catch (err) {
+        responseDiv.className = 'response error';
+        responseDiv.textContent = 'Network error. Please try again.';
+      }
+    });
+  </script>
+</body>
+</html>

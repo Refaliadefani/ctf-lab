@@ -1,0 +1,7 @@
+# robots.txt - Admin Feedback System
+# Security: Restrict sensitive endpoints from crawlers
+
+User-agent: *
+Disallow: /api/verify-mfa
+Disallow: /dashboard
+Disallow: /api/
